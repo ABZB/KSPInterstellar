@@ -1,6 +1,4 @@
-﻿extern alias ORSvKSPIE;
-using ORSvKSPIE::OpenResourceSystem;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -14,6 +12,8 @@ namespace FNPlugin
         [KSPField(isPersistant = false)]
         public float optimalPebbleTemp;
         [KSPField(isPersistant = false)]
+        public bool heatThrottling = false;
+        [KSPField(isPersistant = false)]
         public float tempZeroPower;
         [KSPField(isPersistant = false)]
         public float upgradedOptimalPebbleTemp = 1000;
@@ -23,6 +23,14 @@ namespace FNPlugin
         public float overheatPercentage;
         [KSPField(isPersistant = false, guiActiveEditor = false, guiActive = false, guiName = "Wasteheat Ratio")]
         public float resourceBarRatio;
+        [KSPField(isPersistant = false)]
+        public float thermalRatioEfficiencyModifier = 0.81f;
+        [KSPField(isPersistant = false)]
+        public float maximumChargedIspMult = 114f;
+        [KSPField(isPersistant = false)]
+        public float minimumChargdIspMult = 11.4f;
+
+        private float optimalTempDifference;
      
 
         [KSPEvent(guiName = "Manual Restart", externalToEVAOnly = true, guiActiveUnfocused = true, unfocusedRange = 3.5f)]
@@ -37,29 +45,23 @@ namespace FNPlugin
             IsEnabled = false;
         }
 
+        public float MaximumChargedIspMult { get { return maximumChargedIspMult; } }
+
+        public float MinimumChargdIspMult { get { return minimumChargdIspMult; } }
+
         public double CurrentMeVPerChargedProduct { get { return current_fuel_mode != null ? current_fuel_mode.MeVPerChargedProduct : 0; } }
 
         public override bool IsNeutronRich { get { return current_fuel_mode != null ? !current_fuel_mode.Aneutronic : false; } }
 
-        public override float MaximumThermalPower 
-        { 
-            get 
-            {
-                return base.MaximumThermalPower * (float)ThermalRatioEfficiency; 
-            } 
-        }
+        public override float MaximumThermalPower { get { return base.MaximumThermalPower * (float)ThermalRatioEfficiency; } }
 
-        public override float MaximumChargedPower
-        {
-            get
-            {
-                return base.MaximumChargedPower * (float)ThermalRatioEfficiency;
-            }
-        }
+        public override double ChargedPowerRatio { get { return base.ChargedPowerRatio; } }
+
+        public override float MaximumChargedPower { get  { return base.MaximumChargedPower * (float)ThermalRatioEfficiency; } }
 
         private double ThermalRatioEfficiency       
         {
-            get { return reactorType == 2 ? Math.Pow((ZeroPowerTemp - CoreTemperature) / (ZeroPowerTemp - OptimalTemp), 0.81) : 1; }
+            get { return reactorType == 4 || heatThrottling ? Math.Pow((ZeroPowerTemp - CoreTemperature) / optimalTempDifference, thermalRatioEfficiencyModifier) : 1; }
         }
 
         public float OptimalTemp { get { return isupgraded ? upgradedOptimalPebbleTemp : optimalPebbleTemp; } }
@@ -74,7 +76,7 @@ namespace FNPlugin
         {
             get
             {
-                if (HighLogic.LoadedSceneIsFlight && reactorType == 2 ) 
+                if (HighLogic.LoadedSceneIsFlight && (reactorType == 4 || heatThrottling) ) 
                 {
                     resourceBarRatio = (float)getResourceBarRatio(FNResourceManager.FNRESOURCE_WASTEHEAT);
                     var temperatureIncrease = Math.Max(Math.Pow(resourceBarRatio, 0.25) - 0.2, 0) * 1.25 * (ZeroPowerTemp - OptimalTemp);
@@ -95,6 +97,8 @@ namespace FNPlugin
             base.OnStart(state);
 
             overheatPercentage = (float)(1 - ThermalRatioEfficiency) * 100;
+
+            optimalTempDifference = ZeroPowerTemp - OptimalTemp;
         }
       
 
@@ -118,9 +122,8 @@ namespace FNPlugin
 
         public override float GetCoreTempAtRadiatorTemp(float rad_temp)
         {
-            if (reactorType == 2)
+            if (reactorType == 4 || heatThrottling)
             {
-
                 float pfr_temp = 0;
 
                 if (!double.IsNaN(rad_temp) && !double.IsInfinity(rad_temp))
@@ -135,11 +138,11 @@ namespace FNPlugin
 
         public override float GetThermalPowerAtTemp(float temp)
         {
-            if (reactorType == 2)
+            if (reactorType == 4 || heatThrottling)
             {
                 float rel_temp_diff = 0;
                 if (temp > OptimalTemp && temp < ZeroPowerTemp)
-                    rel_temp_diff = (float)Math.Pow((ZeroPowerTemp - temp) / (ZeroPowerTemp - OptimalTemp), 0.81);
+                    rel_temp_diff = (float)Math.Pow((ZeroPowerTemp - temp) / (ZeroPowerTemp - OptimalTemp), thermalRatioEfficiencyModifier);
                 else
                     rel_temp_diff = 1;
 

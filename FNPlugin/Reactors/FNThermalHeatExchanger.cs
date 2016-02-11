@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-//using System.Threading.Tasks;
 using UnityEngine;
 
 namespace FNPlugin  
@@ -92,8 +91,8 @@ namespace FNPlugin
 
         public double ProducedWasteHeat { get { return 0; } }
 
-        //properties
         public float PowerBufferBonus { get { return 0; } }
+
         public float ThermalTransportationEfficiency { get { return heatTransportationEfficiency; } }
 
         public float ThermalPropulsionEfficiency { get { return 1; } }
@@ -105,6 +104,8 @@ namespace FNPlugin
         public bool IsSelfContained { get { return false; } }
 
         public float CoreTemperature { get { return 1500; } }
+
+        public float HotBathTemperature { get { return CoreTemperature * 1.5f; } }
 
         public float StableMaximumReactorPower { get { return MaximumThermalPower; } }
 
@@ -121,8 +122,6 @@ namespace FNPlugin
         public bool IsActive { get { return IsEnabled; } }
 
         public bool IsNuclear { get { return false; } }
-
-        
 
 
 		[KSPEvent(guiActive = true, guiName = "Activate Heat Exchanger", active = false)]
@@ -190,31 +189,13 @@ namespace FNPlugin
 			setupThermalPower ();
 		}
 
-		public float getCoreTemp() {
-            return 1500;
-		}
-
-        public float GetCoreTempAtRadiatorTemp(float rad_temp) {
-            return 1500;
-        }
+        public float GetCoreTempAtRadiatorTemp(float rad_temp) {  return 1500; }
 
         public float GetThermalPowerAtTemp(float temp) {
             return _thermalpower;
         }
 
-		public float getThermalPower() {
-			return _thermalpower;
-		}
-
-        public float getChargedPower() {
-            return 0;
-        }
-
-		public bool getIsNuclear() {
-			return false;
-		}
-
-		public float getRadius() {
+		public float GetRadius() {
 			return radius;
 		}
 
@@ -222,7 +203,7 @@ namespace FNPlugin
             return IsEnabled;
         }
 
-        public void enableIfPossible() {
+        public void EnableIfPossible() {
             IsEnabled = true;
         }
 

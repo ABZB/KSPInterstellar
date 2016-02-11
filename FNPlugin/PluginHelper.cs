@@ -1,9 +1,8 @@
-﻿using System;
+﻿using UnityEngine;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using UnityEngine;
-using System.Reflection;
+using OpenResourceSystem;
 
 namespace FNPlugin
 {
@@ -12,50 +11,71 @@ namespace FNPlugin
     {
         void Start()
         {
-            GameEvents.onVesselChange.Add(OnVesselChange);
+            //GameEvents.onVesselChange.Add(OnVesselChange);
             GameEvents.onVesselSituationChange.Add(OnVesselSituationChange);
+            GameEvents.onVesselLoaded.Add(OnVesselLoaded);
+            GameEvents.OnTechnologyResearched.Add(OnTechnologyResearched);
+            GameEvents.onGameStateSaved.Add(onGameStateSaved);
+
             Debug.Log("[KSP Interstellar] GameEventSubscriber Initialised");
         }
         void OnDestroy()
         {
-            GameEvents.onVesselChange.Remove(OnVesselChange);
+            //GameEvents.onVesselChange.Remove(OnVesselChange);
+            GameEvents.onVesselSituationChange.Remove(OnVesselSituationChange);
+            GameEvents.onVesselLoaded.Remove(OnVesselLoaded);
+            GameEvents.OnTechnologyResearched.Remove(OnTechnologyResearched);
+            GameEvents.onGameStateSaved.Remove(onGameStateSaved);
+
             Debug.Log("[KSP Interstellar] GameEventSubscriber Deinitialised");
+        }
+
+        void onGameStateSaved(Game game)
+        {
+            Debug.Log("[KSP Interstellar] GameEventSubscriber - detected onGameStateSaved");
+            PluginHelper.LoadSaveFile();
+        }
+
+        void OnVesselLoaded(Vessel vessel)
+        {
+            Debug.Log("[KSP Interstellar] GameEventSubscriber - detected OnVesselLoaded");
+        }
+
+        void OnTechnologyResearched(GameEvents.HostTargetAction<RDTech, RDTech.OperationResult> change)
+        {
+            Debug.Log("[KSP Interstellar] GameEventSubscriber - detected OnTechnologyResearched");
         }
 
         void OnVesselSituationChange(GameEvents.HostedFromToAction<Vessel, Vessel.Situations> change)
         {
-            Debug.Log("[KSP Interstellar] OnVesselSituationChange is called with situation " + change.from.ToString() + " to " + change.to.ToString() + " on vessel " + change.host.name);
-
             bool shouldReinitialise = false;
 
             if (change.from == Vessel.Situations.DOCKED)
-            {
-                Debug.Log("[KSP Interstellar] GameEventSubscriber - OnVesselSituationChange situation changed from Docked");
-
                 shouldReinitialise = true;
-            }
 
             if (change.to == Vessel.Situations.DOCKED)
-            {
-                Debug.Log("[KSP Interstellar] GameEventSubscriber - OnVesselSituationChange situation changed to Docked");
-
                 shouldReinitialise = true;
-            }
 
             if (shouldReinitialise)
             {
+                ORSHelper.removeVesselFromCache(change.host);
+
+                Debug.Log("[KSP Interstellar] GameEventSubscriber - OnVesselSituationChange reinitialising");
+
                 var generators = change.host.FindPartModulesImplementing<FNGenerator>();
 
                 generators.ForEach(g => g.OnStart(PartModule.StartState.Docked));
+
+                var radiators = change.host.FindPartModulesImplementing<FNRadiator>();
+
+                radiators.ForEach(g => g.OnStart(PartModule.StartState.Docked));
             }
-
-            Debug.Log("[KSP Interstellar] GameEventSubscriber - OnVesselSituationChange is finished");
         }
 
-        void OnVesselChange(Vessel v)
-        {
-            Debug.Log("[KSP Interstellar] OnVesselChange is called");
-        }
+        //void OnVesselChange(Vessel v)
+        //{
+        //    Debug.Log("[KSP Interstellar] OnVesselChange is called");
+        //}
     }
 
 
@@ -123,8 +143,8 @@ namespace FNPlugin
         private static double _minAtmosphericAirDensity = 0;
         public static double MinAtmosphericAirDensity { get { return _minAtmosphericAirDensity; } }
 
-		private static double _gravityConstant = GameConstants.STANDARD_GRAVITY; 
-        public static double GravityConstant { get { return _gravityConstant; } }
+		private static float _gravityConstant = GameConstants.STANDARD_GRAVITY; 
+        public static float GravityConstant { get { return _gravityConstant; } }
 
 		private static double _ispCoreTempMult = GameConstants.IspCoreTemperatureMultiplier;
         public static double IspCoreTempMult { get { return _ispCoreTempMult; } }
@@ -239,36 +259,83 @@ namespace FNPlugin
         private static bool _matchDemandWithSupply = false;
         public static bool MatchDemandWithSupply { get { return _matchDemandWithSupply; } }
 
+        private static string _jetUpgradeTech0 = String.Empty;
+        public static string JetUpgradeTech0 { get { return _jetUpgradeTech0; } private set { _jetUpgradeTech0 = value; } }
+
+        private static string _jetUpgradeTech1 = String.Empty;
+        public static string JetUpgradeTech1 { get { return _jetUpgradeTech1; } private set { _jetUpgradeTech1 = value; } }
+
+        private static string _jetUpgradeTech2 = String.Empty;
+        public static string JetUpgradeTech2 { get { return _jetUpgradeTech2; } private set { _jetUpgradeTech2 = value; } }
+
+        private static string _jetUpgradeTech3 = String.Empty;
+        public static string JetUpgradeTech3 { get { return _jetUpgradeTech3; } private set { _jetUpgradeTech3 = value; } }
+
         #endregion
+
+        public static bool HasTechRequirementOrEmpty(string techName)
+        {
+            return techName == String.Empty || PluginHelper.upgradeAvailable(techName);
+        }
 
         public static bool hasTech(string techid)
         {
-            try
+            if (ResearchAndDevelopment.Instance == null)
+                return HasTechFromSaveFile(techid);
+
+            var techstate = ResearchAndDevelopment.Instance.GetTechState(techid);
+            if (techstate != null)
             {
-                string persistentfile = KSPUtil.ApplicationRootPath + "saves/" + HighLogic.SaveFolder + "/persistent.sfs";
-                ConfigNode config = ConfigNode.Load(persistentfile);
-                ConfigNode gameconf = config.GetNode("GAME");
-                ConfigNode[] scenarios = gameconf.GetNodes("SCENARIO");
-                foreach (ConfigNode scenario in scenarios)
+                var available = techstate.state == RDTech.State.Available;
+                if (available)
+                    UnityEngine.Debug.Log("[KSPI] - found techid " + techid + " available");
+                else
+                    UnityEngine.Debug.Log("[KSPI] - found techid " + techid + " unavailable");
+                return available;
+            }
+            else
+            {
+                UnityEngine.Debug.Log("[KSPI] - did not find techid " + techid);
+                return false;
+            }
+        }
+
+        private static HashSet<string> researchedTechs;
+
+        public static void LoadSaveFile()
+        {
+            string persistentfile = KSPUtil.ApplicationRootPath + "saves/" + HighLogic.SaveFolder + "/persistent.sfs";
+            UnityEngine.Debug.Log("[KSPI] - Loading ConfigNode " + persistentfile);
+            ConfigNode config = ConfigNode.Load(persistentfile);
+            researchedTechs = new HashSet<string>();
+            ConfigNode gameconf = config.GetNode("GAME");
+            ConfigNode[] scenarios = gameconf.GetNodes("SCENARIO");
+            foreach (ConfigNode scenario in scenarios)
+            {
+                if (scenario.GetValue("name") == "ResearchAndDevelopment")
                 {
-                    if (scenario.GetValue("name") == "ResearchAndDevelopment")
+                    ConfigNode[] techs = scenario.GetNodes("Tech");
+                    foreach (ConfigNode technode in techs)
                     {
-                        ConfigNode[] techs = scenario.GetNodes("Tech");
-                        foreach (ConfigNode technode in techs)
-                        {
-                            if (technode.GetValue("id") == techid)
-                            {
-                                return true;
-                            }
-                        }
+                        var technodename = technode.GetValue("id");
+                        researchedTechs.Add(technodename);
                     }
                 }
-                return false;
             }
-            catch (Exception)
-            {
-                return false;
-            }
+        }
+
+        public static bool HasTechFromSaveFile(string techid)
+        {
+            if (researchedTechs == null)
+                LoadSaveFile();
+
+            bool found = researchedTechs.Contains(techid);
+            if (found)
+                UnityEngine.Debug.Log("[KSPI] - found techid " + techid + " in saved hash");
+            else
+                UnityEngine.Debug.Log("[KSPI] - we did not find techid " + techid + " in saved hash");
+
+            return found;
         }
 
         public static bool HasTechRequirmentOrEmpty(string techName)
@@ -417,9 +484,6 @@ namespace FNPlugin
         public static double getMaxAtmosphericAltitude(CelestialBody body)
         {
             if (!body.atmosphere) return 0;
-
-            //return (float)-body.atmosphereScaleHeight * 1000.0f * Mathf.Log(1e-6f);
-            //return (float)-body.atmosphereDepth * 1000.0f * Mathf.Log(1e-6f);
             return body.atmosphereDepth;
         }
 
@@ -440,67 +504,6 @@ namespace FNPlugin
             else
                 return vessel.mainBody.scienceValues.InSpaceHighDataValue;
         }
-
-        //public static float getScienceMultiplier(int refbody, bool landed)
-        //{
-        //    float multiplier = 1;
-
-        //    if (refbody == REF_BODY_DUNA || refbody == REF_BODY_EVE || refbody == REF_BODY_IKE || refbody == REF_BODY_GILLY)
-        //        multiplier = 5f;
-        //    else if (refbody == REF_BODY_MUN || refbody == REF_BODY_MINMUS)
-        //        multiplier = 2.5f;
-        //    else if (refbody == REF_BODY_JOOL || refbody == REF_BODY_TYLO || refbody == REF_BODY_POL || refbody == REF_BODY_BOP)
-        //        multiplier = 10f;
-        //    else if (refbody == REF_BODY_LAYTHE || refbody == REF_BODY_VALL)
-        //        multiplier = 12f;
-        //    else if (refbody == REF_BODY_EELOO || refbody == REF_BODY_MOHO)
-        //        multiplier = 20f;
-        //    else if (refbody == REF_BODY_DRES)
-        //        multiplier = 7.5f;
-        //    else if (refbody == REF_BODY_KERBIN)
-        //        multiplier = 2f;
-        //    else if (refbody == REF_BODY_KERBOL)
-        //        multiplier = 15f;
-        //    else
-        //        multiplier = 20f; // must be somewhere special
-
-        //    if (landed)
-        //    {
-        //        if (refbody == REF_BODY_TYLO)
-        //            multiplier *= 3f;
-        //        if (refbody == REF_BODY_KERBIN)
-        //            multiplier *= 0.5f; // Starting on Kerbin is earier than getting a lab into orbit
-        //        else if (refbody == REF_BODY_EVE)
-        //            multiplier *= 2.5f;
-        //        else
-        //            multiplier *=  2f;
-        //    }
-
-        //    return multiplier;
-        //}
-
-        //public static float getImpactorScienceMultiplier(int refbody)
-        //{
-        //    float multiplier = 1;
-
-        //    if (refbody == REF_BODY_DUNA || refbody == REF_BODY_EVE || refbody == REF_BODY_IKE || refbody == REF_BODY_GILLY)
-        //        multiplier = 7f;
-        //    else if (refbody == REF_BODY_MUN || refbody == REF_BODY_MINMUS)
-        //        multiplier = 5f;
-        //    else if (refbody == REF_BODY_JOOL || refbody == REF_BODY_TYLO || refbody == REF_BODY_POL || refbody == REF_BODY_BOP)
-        //        multiplier = 9f;
-        //    else if (refbody == REF_BODY_LAYTHE || refbody == REF_BODY_VALL)
-        //        multiplier = 11f;
-        //    else if (refbody == REF_BODY_EELOO || refbody == REF_BODY_MOHO)
-        //        multiplier = 14f;
-        //    else if (refbody == REF_BODY_DRES)
-        //        multiplier = 8f;
-        //    else if (refbody == REF_BODY_KERBIN)
-        //        multiplier = 0.5f;
-        //    else
-        //        multiplier = 0f;
-        //    return multiplier;
-        //}
 
         public static string getFormattedPowerString(double power, string shortFormat = "0", string longFormat = "0.0")
         {
@@ -599,16 +602,14 @@ namespace FNPlugin
                         PluginHelper._matchDemandWithSupply = bool.Parse(plugin_settings.GetValue("MatchDemandWithSupply"));
                         Debug.Log("[KSP Interstellar] Match Demand With Supply: " + PluginHelper.MatchDemandWithSupply.ToString());
                     }
-
                     if (plugin_settings.HasValue("MaxPowerDrawForExoticMatterMult"))
                     {
                         PluginHelper._maxPowerDrawForExoticMatterMult = float.Parse(plugin_settings.GetValue("MaxPowerDrawForExoticMatterMult"));
                         Debug.Log("[KSP Interstellar] Max Power Draw For Exotic Matter Multiplier set to: " + PluginHelper.MaxPowerDrawForExoticMatterMult.ToString("0.000000"));
                     }
-
                     if (plugin_settings.HasValue("GravityConstant"))
                     {
-                        PluginHelper._gravityConstant = double.Parse(plugin_settings.GetValue("GravityConstant"));
+                        PluginHelper._gravityConstant = Single.Parse(plugin_settings.GetValue("GravityConstant"));
                         Debug.Log("[KSP Interstellar] Gravity constant set to: " + PluginHelper.GravityConstant.ToString("0.000000"));
                     }
                     if (plugin_settings.HasValue("IspCoreTempMult"))
@@ -706,6 +707,26 @@ namespace FNPlugin
                         PluginHelper._minAtmosphericAirDensity = double.Parse(plugin_settings.GetValue("MinAtmosphericAirDensity"));
                         Debug.Log("[KSP Interstellar] Minimum Atmospheric Air Density set to: " + PluginHelper.MinAtmosphericAirDensity.ToString("0.0"));
                     }
+                    if (plugin_settings.HasValue("JetUpgradeTech0"))
+                    {
+                        PluginHelper.JetUpgradeTech0 = plugin_settings.GetValue("JetUpgradeTech0");
+                        Debug.Log("[KSP Interstellar] JetUpgradeTech0" + PluginHelper.JetUpgradeTech0);
+                    }
+                    if (plugin_settings.HasValue("JetUpgradeTech1"))
+                    {
+                        PluginHelper.JetUpgradeTech1 = plugin_settings.GetValue("JetUpgradeTech1");
+                        Debug.Log("[KSP Interstellar] JetUpgradeTech1" + PluginHelper.JetUpgradeTech1);
+                    }
+                    if (plugin_settings.HasValue("JetUpgradeTech2"))
+                    {
+                        PluginHelper.JetUpgradeTech2 = plugin_settings.GetValue("JetUpgradeTech2");
+                        Debug.Log("[KSP Interstellar] JetUpgradeTech2" + PluginHelper.JetUpgradeTech2);
+                    }
+                    if (plugin_settings.HasValue("JetUpgradeTech3"))
+                    {
+                        PluginHelper.JetUpgradeTech3 = plugin_settings.GetValue("JetUpgradeTech3");
+                        Debug.Log("[KSP Interstellar] JetUpgradeTech3" + PluginHelper.JetUpgradeTech3);
+                    }
 
                     resources_configured = true;
                 }
@@ -721,15 +742,6 @@ namespace FNPlugin
             gdb = GameDatabase.Instance;
             plugin_init = true;
 
-            //AvailablePart kerbalRadiationPart = PartLoader.getPartInfoByName("kerbalEVA");
-            //if (kerbalRadiationPart.partPrefab.Modules != null)
-            //{
-            //    if (kerbalRadiationPart.partPrefab.FindModulesImplementing<FNModuleRadiation>().Count == 0)
-            //        kerbalRadiationPart.partPrefab.gameObject.AddComponent<FNModuleRadiation>();
-            //}
-            //else
-            //    kerbalRadiationPart.partPrefab.gameObject.AddComponent<FNModuleRadiation>();
-
             List<AvailablePart> available_parts = PartLoader.LoadedPartsList;
             foreach (AvailablePart available_part in available_parts)
             {
@@ -738,31 +750,29 @@ namespace FNPlugin
                 {
                     if (prefab_available_part.Modules == null) continue;
 
-                    if (prefab_available_part.FindModulesImplementing<ModuleResourceIntake>().Count > 0)
+                    ModuleResourceIntake intake = prefab_available_part.FindModuleImplementing<ModuleResourceIntake>();
+
+                    if (intake != null && intake.resourceName == "IntakeAir")
                     {
-                        ModuleResourceIntake intake = prefab_available_part.Modules["ModuleResourceIntake"] as ModuleResourceIntake;
-                        if (intake.resourceName == "IntakeAir")
+                        var pm = prefab_available_part.gameObject.AddComponent<AtmosphericIntake>();
+                        prefab_available_part.Modules.Add(pm);
+                        pm.area = intake.area;
+                        //pm.aoaThreshold = intake.aoaThreshold;
+                        pm.intakeTransformName = intake.intakeTransformName;
+                        //pm.maxIntakeSpeed = intake.maxIntakeSpeed;
+                        pm.unitScalar = intake.unitScalar;
+                        //pm.useIntakeCompensation = intake.useIntakeCompensation;
+                        //pm.storesResource = intake.storesResource;
+
+                        PartResource intake_air_resource = prefab_available_part.Resources["IntakeAir"];
+
+                        if (intake_air_resource != null && !prefab_available_part.Resources.Contains(InterstellarResourcesConfiguration.Instance.IntakeAtmosphere))
                         {
-                            var pm = prefab_available_part.gameObject.AddComponent<AtmosphericIntake>();
-                            prefab_available_part.Modules.Add(pm);
-                            pm.area = intake.area;
-                            pm.aoaThreshold = intake.aoaThreshold;
-                            pm.intakeTransformName = intake.intakeTransformName;
-                            pm.maxIntakeSpeed = intake.maxIntakeSpeed;
-                            pm.unitScalar = intake.unitScalar;
-                            pm.useIntakeCompensation = intake.useIntakeCompensation;
-                            pm.storesResource = intake.storesResource;
-
-                            PartResource intake_air_resource = prefab_available_part.Resources["IntakeAir"];
-
-                            if (intake_air_resource != null && !prefab_available_part.Resources.Contains(InterstellarResourcesConfiguration.Instance.IntakeAtmosphere))
-                            {
-                                ConfigNode node = new ConfigNode("RESOURCE");
-                                node.AddValue("name", InterstellarResourcesConfiguration.Instance.IntakeAtmosphere);
-                                node.AddValue("maxAmount", intake_air_resource.maxAmount);
-                                node.AddValue("possibleAmount", intake_air_resource.amount);
-                                prefab_available_part.AddResource(node);
-                            }
+                            ConfigNode node = new ConfigNode("RESOURCE");
+                            node.AddValue("name", InterstellarResourcesConfiguration.Instance.IntakeAtmosphere);
+                            node.AddValue("maxAmount", intake_air_resource.maxAmount);
+                            node.AddValue("possibleAmount", intake_air_resource.amount);
+                            prefab_available_part.AddResource(node);
                         }
 
                     }
@@ -772,35 +782,35 @@ namespace FNPlugin
                         var existingSolarControlModule = prefab_available_part.FindModuleImplementing<FNSolarPanelWasteHeatModule>();
                         if (existingSolarControlModule == null)
                         {
-                            //ModuleDeployableSolarPanel panel = prefab_available_part.Modules["ModuleDeployableSolarPanel"] as ModuleDeployableSolarPanel;
                             ModuleDeployableSolarPanel panel = prefab_available_part.FindModuleImplementing<ModuleDeployableSolarPanel>();
                             if (panel.chargeRate > 0)
                             {
-                                Type type = AssemblyLoader.GetClassByName(typeof(PartModule), "FNSolarPanelWasteHeatModule");
-                                if (type != null)
-                                {
+                                //Type type = AssemblyLoader.GetClassByName(typeof(PartModule), "FNSolarPanelWasteHeatModule");
+                                Type type = typeof(FNSolarPanelWasteHeatModule);
+                                //if (type != null)
+                                //{
                                     FNSolarPanelWasteHeatModule pm = prefab_available_part.gameObject.AddComponent(type) as FNSolarPanelWasteHeatModule;
                                     prefab_available_part.Modules.Add(pm);
-                                }
+                                //}
                             }
 
-                            if (!prefab_available_part.Resources.Contains("WasteHeat") && panel.chargeRate > 0)
-                            {
-                                ConfigNode node = new ConfigNode("RESOURCE");
-                                node.AddValue("name", "WasteHeat");
-                                node.AddValue("maxAmount", panel.chargeRate * 100);
-                                node.AddValue("possibleAmount", 0);
+                            //if (!prefab_available_part.Resources.Contains("WasteHeat") && panel.chargeRate > 0)
+                            //{
+                            //    ConfigNode node = new ConfigNode("RESOURCE");
+                            //    node.AddValue("name", "WasteHeat");
+                            //    node.AddValue("maxAmount", panel.chargeRate * 100);
+                            //    node.AddValue("possibleAmount", 0);
 
-                                PartResource pr = prefab_available_part.AddResource(node);
+                            //    PartResource pr = prefab_available_part.AddResource(node);
 
-                                if (available_part.resourceInfo != null && pr != null)
-                                {
-                                    if (available_part.resourceInfo.Length == 0)
-                                        available_part.resourceInfo = pr.resourceName + ":" + pr.amount + " / " + pr.maxAmount;
-                                    else
-                                        available_part.resourceInfo = available_part.resourceInfo + "\n" + pr.resourceName + ":" + pr.amount + " / " + pr.maxAmount;
-                                }
-                            }
+                            //    if (available_part.resourceInfo != null && pr != null)
+                            //    {
+                            //        if (available_part.resourceInfo.Length == 0)
+                            //            available_part.resourceInfo = pr.resourceName + ":" + pr.amount + " / " + pr.maxAmount;
+                            //        else
+                            //            available_part.resourceInfo = available_part.resourceInfo + "\n" + pr.resourceName + ":" + pr.amount + " / " + pr.maxAmount;
+                            //    }
+                            //}
                         }
 
                     }
@@ -815,32 +825,6 @@ namespace FNPlugin
                              mod_info.moduleName = "Electric Engine";
                     }
 
-
-                    //if (prefab_available_part.FindModulesImplementing<FNNozzleController>().Count() > 0)
-                    //{
-                    //    available_part.moduleInfo = prefab_available_part.FindModulesImplementing<FNNozzleController>().First().GetInfo();
-                    //    available_part.moduleInfos.RemoveAll(modi => modi.moduleName == "Engine");
-                    //    AvailablePart.ModuleInfo mod_info = available_part.moduleInfos.FirstOrDefault(modi => modi.moduleName == "FNNozzle Controller");
-
-                    //    if (mod_info != null)
-                    //        mod_info.moduleName = "Thermal Nozzle";
-                    //}
-
-                    //if (prefab_available_part.CrewCapacity > 0 || prefab_available_part.FindModulesImplementing<ModuleCommand>().Count > 0)
-                    //{
-                    //    Type type = AssemblyLoader.GetClassByName(typeof(PartModule), "FNModuleRadiation");
-                    //    if (type != null)
-                    //    {
-                    //        FNModuleRadiation pm = prefab_available_part.gameObject.AddComponent(type) as FNModuleRadiation;
-                    //        prefab_available_part.Modules.Add(pm);
-                    //        pm.rad_hardness = (float)(prefab_available_part.mass / (Math.Max(prefab_available_part.CrewCapacity, 0.1)) * 7.5);
-                    //        AvailablePart.ModuleInfo minfo = new AvailablePart.ModuleInfo();
-                    //        minfo.moduleName = "Radiation Status";
-                    //        minfo.info = pm.GetInfo();
-                    //        available_part.moduleInfos.Add(minfo);
-                    //    }
-                    //    print("Adding ModuleRadiation to " + prefab_available_part.name);
-                    //}
                 }
                 catch (Exception ex)
                 {

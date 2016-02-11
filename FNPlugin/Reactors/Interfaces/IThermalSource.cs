@@ -36,17 +36,19 @@ namespace FNPlugin
 
         float CoreTemperature { get; }
 
+        float HotBathTemperature { get; }
+
         bool IsSelfContained { get; }
 
         bool IsActive { get; }
 
         bool IsVolatileSource { get; }
 
-        float getRadius();
+        float GetRadius();
 
         bool IsNuclear { get; }
 
-		void enableIfPossible();
+		void EnableIfPossible();
 
         bool shouldScaleDownJetISP();
 

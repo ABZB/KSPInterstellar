@@ -1,6 +1,4 @@
-﻿extern alias ORSvKSPIE;
-using ORSvKSPIE::OpenResourceSystem;
-
+﻿using OpenResourceSystem;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -604,7 +602,7 @@ namespace FNPlugin
             get 
             {
                 if (type == (int)ElectricEngineType.ARCJET)
-                    return (0.87 + Current_propellant.Efficiency) / 2;
+                    return 0.87 * Current_propellant.Efficiency;
                 else if (type == (int)ElectricEngineType.VASIMR)
                     return baseEfficency + ((1 - _attached_engine.currentThrottle) * variableEfficency);
                 else 
@@ -626,9 +624,9 @@ namespace FNPlugin
 
                 double efficiency;
                 if (type == (int)ElectricEngineType.ARCJET)
-                    efficiency = 0.87;
+                    efficiency = 0.87 * prop.Efficiency;
                 else if (type == (int)ElectricEngineType.VASIMR)
-                    efficiency = 0.55;
+                    efficiency = baseEfficency + 0.5 * variableEfficency;
                 else 
                     efficiency = prop.Efficiency;
 

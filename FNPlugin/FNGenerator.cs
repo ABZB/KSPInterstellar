@@ -9,6 +9,15 @@ namespace FNPlugin
 {
     enum PowerStates { powerChange, powerOnline, powerDown, powerOffline };
 
+    [KSPModule("Super Capacitator")]
+    class KspiSuperCapacitator : PartModule
+    {
+        [KSPField(isPersistant = false, guiActiveEditor = true, guiName = "Max Capacity", guiUnits = " MWe")]
+        public float maxStorageCapacityMJ = 0;
+        [KSPField(isPersistant = false, guiActive = true, guiActiveEditor = true, guiName = "Mass", guiUnits = " t")]
+        public float partMass = 0;
+    }
+
     [KSPModule("Electrical Generator")]
     class FNGenerator : FNResourceSuppliableModule, IUpgradeableModule, IElectricPowerSource
     {
@@ -20,7 +29,7 @@ namespace FNPlugin
         [KSPField(isPersistant = true)]
         public bool isupgraded = false;
         [KSPField(isPersistant = true)]
-        public bool chargedParticleMode;
+        public bool chargedParticleMode = false;
 
         // Persistent False
         [KSPField(isPersistant = false)]
@@ -37,7 +46,7 @@ namespace FNPlugin
         public string upgradeTechReq;
         [KSPField(isPersistant = false)]
         public float upgradeCost;
-        [KSPField(isPersistant = false, guiActive = true, guiName = "Radius")]
+        [KSPField(isPersistant = false, guiActive = false, guiActiveEditor = true, guiName = "Radius")]
         public float radius;
         [KSPField(isPersistant = false)]
         public string altUpgradedName;
@@ -66,6 +75,9 @@ namespace FNPlugin
         //[KSPField(isPersistant = false, guiActive = false, guiName = "Combined Power", guiUnits = " MW_e")]
         //public float _totalMaximumPowerAllReactors;
 
+        [KSPField(isPersistant = false, guiActive = true, guiName = "Required Capacity", guiUnits = " MW_e")]
+        public float requiredMegawattCapacity;
+
         [KSPField(isPersistant = false, guiActive = true, guiName = "Heat Exchange Divisor")]
         public float heat_exchanger_thrust_divisor;
 
@@ -74,8 +86,11 @@ namespace FNPlugin
         public float requestedPower_f;
 
         // Internal
+        //[KSPField(isPersistant = false, guiActive = true, guiName = "Cold Bath")]
         protected float coldBathTemp = 500;
+        //[KSPField(isPersistant = false, guiActive = true, guiName = "Hot Bath")]
         protected float hotBathTemp = 1;
+
         protected float outputPower;
         protected double _totalEff;
         protected float sectracker = 0;
@@ -345,22 +360,22 @@ namespace FNPlugin
         {
             if (myAttachedReactor == null) return;
 
-            if (myAttachedReactor.getRadius() <= 0 || radius <= 0)
+            if (myAttachedReactor.GetRadius() <= 0 || radius <= 0)
             {
                 heat_exchanger_thrust_divisor = 1;
                 return;
             }
 
-            heat_exchanger_thrust_divisor = radius > myAttachedReactor.getRadius()
-                ? myAttachedReactor.getRadius() * myAttachedReactor.getRadius() / radius / radius
-                : radius * radius / myAttachedReactor.getRadius() / myAttachedReactor.getRadius();
+            heat_exchanger_thrust_divisor = radius > myAttachedReactor.GetRadius()
+                ? myAttachedReactor.GetRadius() * myAttachedReactor.GetRadius() / radius / radius
+                : radius * radius / myAttachedReactor.GetRadius() / myAttachedReactor.GetRadius();
         }
 
         public void updateGeneratorPower()
         {
             if (myAttachedReactor == null) return;
 
-            hotBathTemp = myAttachedReactor.CoreTemperature;
+            hotBathTemp = myAttachedReactor.HotBathTemperature;
 
             if (HighLogic.LoadedSceneIsEditor)
                 UpdateHeatExchangedThrustDivisor();
@@ -396,7 +411,7 @@ namespace FNPlugin
                     _powerState = PowerStates.powerOnline;
 
                     var powerBufferingBonus = myAttachedReactor.PowerBufferBonus * maxStableMegaWattPower;
-                    var requiredMegawattCapacity = Math.Max(0.0001, TimeWarp.fixedDeltaTime * maxStableMegaWattPower + powerBufferingBonus);
+                    requiredMegawattCapacity = (float)Math.Max(0.0001, TimeWarp.fixedDeltaTime * maxStableMegaWattPower + powerBufferingBonus);
                     var previousMegawattCapacity = Math.Max(0.0001, previousTimeWarp * maxStableMegaWattPower + powerBufferingBonus);
 
                     if (megajouleResource != null)
@@ -487,7 +502,7 @@ namespace FNPlugin
                 }
                 else // charged particle mode
                 {
-                    _totalEff = directConversionEff * myAttachedReactor.ChargedParticleEnergyEfficiency;
+                    _totalEff = isupgraded ? upgradedDirectConversionEff : directConversionEff;
 
                     myAttachedReactor.NotifyActiveChargedEnergyGenrator(_totalEff, ElectricGeneratorType.charged_particle);
 
